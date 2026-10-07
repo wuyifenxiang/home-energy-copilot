@@ -1,0 +1,16 @@
+# This project has no runtime dependencies.
+#
+# The MCP protocol (revision 2025-11-25) is implemented directly against the
+# specification using only the Python 3.11+ standard library, so there is
+# nothing to install before `python -m alexa_mcp` will run.
+#
+# If you prefer the official SDK, the equivalent server can be written with:
+#     mcp>=1.2.0        # provides FastMCP and the Streamable HTTP transport
+#
+# We deliberately did not take that dependency: `pip` stalled indefinitely
+# against PyPI during development (see friction-log/FRICTION_LOG.md entry 6),
+# and a zero-install submission is easier for judges to verify.
+#
+# Development-only tools, if you want them:
+#     ruff>=0.6.0
+#     pytest>=8.0.0

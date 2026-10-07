@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Project state: the demo home is synthetic and must not be committed.
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Local configuration and secrets
+.env
+.env.*
+*.local
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Recordings produced for the submission
+*.mp4
+*.mov

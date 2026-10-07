@@ -1,0 +1,36 @@
+# Normalize line endings so a Windows checkout and a Linux container build
+# produce byte-identical source files.
+#
+# Without this, git's autocrlf converts every text file to CRLF on checkout.
+# Docker builds from the repo into a Linux image, and CRLF in a shell script or
+# a Python module can produce "bad interpreter" errors or confusing diffs.
+# Committing LF-normalized text is what makes `docker build` from a Git clone
+# behave the same as running locally.
+
+* text=auto eol=lf
+
+# Windows-only scripts still need CRLF to run.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets must never be touched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.db binary
+*.mp4 binary
+*.mov binary
+*.zip binary
+
+# Keep diffs readable and avoid merge noise in generated or lock files.
+*.md text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+Dockerfile text eol=lf
+LICENSE text eol=lf
