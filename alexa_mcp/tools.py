@@ -24,7 +24,17 @@ from .store import Database, seed_demo_home
 WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
-def build_registry(db: Database, home_id: str = "home-1") -> ToolRegistry:
+def build_registry(
+    db: Database,
+    home_id: str = "home-1",
+    *,
+    expose_status: bool = False,
+) -> ToolRegistry:
+    """Build the tool surface.
+
+    ``expose_status`` adds a diagnostics-only tool for operators and reviewers.
+    It is off by default so the customer-facing tool list stays focused.
+    """
     registry = ToolRegistry()
 
     # -- helpers ----------------------------------------------------------
@@ -889,6 +899,65 @@ def build_registry(db: Database, home_id: str = "home-1") -> ToolRegistry:
                 ),
             },
         }
+
+    if expose_status:
+        # A diagnostics tool, not a customer-facing one. It lets a reviewer
+        # confirm that the Amazon Bedrock integration is live and that the
+        # figure-preservation guard has been exercised, without spending money on
+        # a generation call. A generic model should not be offered this, which is
+        # why it is off unless explicitly requested.
+        @registry.tool(
+            "get_integration_status",
+            title="Get integration status",
+            description=(
+                "Report which optional integrations are active, including whether "
+                "Amazon Bedrock is rephrasing spoken responses and whether its "
+                "figure-preservation guard has rejected anything. This is a "
+                "diagnostics tool for operators and reviewers."
+            ),
+            input_schema={
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+            annotations={"readOnlyHint": True},
+        )
+        def get_integration_status() -> dict[str, Any]:
+            from .bedrock import get_rewriter
+
+            require_home()
+            status = get_rewriter().status()
+            rate = status.get("stats", {})
+            if status.get("active"):
+                spoken = (
+                    f"Amazon Bedrock is active using {status['model']} in "
+                    f"{status['region']}. It has rephrased {rate.get('used', 0)} "
+                    f"responses and rejected {rate.get('rejected', 0)}."
+                )
+            else:
+                spoken = (
+                    "Amazon Bedrock is not active, so spoken responses use the "
+                    "built-in templates. Every figure is still measured from the "
+                    "stored energy history."
+                )
+            return {
+                "speech": spoken,
+                "display": "**Integration status**\n\n"
+                + f"- Bedrock active: **{'yes' if status.get('active') else 'no'}**\n"
+                + f"- Model: `{status.get('model') or 'not configured'}`\n"
+                + f"- Region: `{status.get('region')}`\n"
+                + f"- Credentials: `{status.get('credentialSource')}`\n"
+                + f"- Rewrites used: {rate.get('used', 0)}\n"
+                + f"- Rewrites rejected (figures changed): {rate.get('rejected', 0)}\n"
+                + f"- Calls failed: {rate.get('failed', 0)}\n"
+                + f"- Cache hits: {rate.get('cached', 0)}",
+                "data": {
+                    "bedrock": status,
+                    "tools": len(registry),
+                    "protocolVersion": "2025-11-25",
+                },
+            }
 
     return registry
 

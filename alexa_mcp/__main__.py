@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -63,6 +64,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip seeding the demo home.",
     )
+    parser.add_argument(
+        "--no-bedrock",
+        action="store_true",
+        help=(
+            "Never call Amazon Bedrock; always use the built-in spoken templates. "
+            "Bedrock is only used when ALEXA_MCP_BEDROCK_MODEL and AWS credentials "
+            "are set, so this flag is for forcing templates even when they are."
+        ),
+    )
     parser.add_argument("--log-level", default="INFO", help="DEBUG, INFO, WARNING, ERROR.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
@@ -104,11 +114,18 @@ def main(argv: list[str] | None = None) -> int:
     if not args.no_seed:
         seed_demo_home(db)
 
-    registry = build_registry(db)
+    expose_status = os.environ.get("ALEXA_MCP_EXPOSE_STATUS", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    registry = build_registry(db, expose_status=expose_status)
 
     if args.describe:
         print(describe_registry(registry))
         print(f"\ntool surface fingerprint: {registry_fingerprint(registry)}")
+        print(f"bedrock rewriting: {'on' if not args.no_bedrock else 'off'}")
         return 0
 
     if args.host not in ("127.0.0.1", "localhost", "::1"):
@@ -127,22 +144,47 @@ def main(argv: list[str] | None = None) -> int:
         allowed_origins=tuple(args.allowed_origin),
         version=__version__,
         instructions=INSTRUCTIONS,
+        bedrock_rewrite=not args.no_bedrock,
         log_level=getattr(logging, args.log_level.upper(), logging.INFO),
     )
 
+    logger = logging.getLogger("alexa_mcp")
     url = f"http://{args.host}:{args.port}{args.path}"
-    logging.getLogger("alexa_mcp").info("MCP endpoint ready at %s", url)
-    logging.getLogger("alexa_mcp").info(
+    logger.info("MCP endpoint ready at %s", url)
+    logger.info(
         "protocol %s (also accepts %s)",
         PROTOCOL_VERSION,
         ", ".join(SUPPORTED_PROTOCOL_VERSIONS[1:]),
     )
-    logging.getLogger("alexa_mcp").info(
-        "health check: http://%s:%s/healthz", args.host, args.port
-    )
-    logging.getLogger("alexa_mcp").info(
+    logger.info("health check: http://%s:%s/healthz", args.host, args.port)
+    logger.info(
         "%d tools: %s", len(app.registry), ", ".join(app.registry.names())
     )
+
+    # Say plainly whether Bedrock is live. Without this line it is impossible to
+    # tell "Bedrock is working" from "Bedrock silently fell back to templates".
+    if args.no_bedrock:
+        logger.info("Amazon Bedrock rewriting: disabled by --no-bedrock")
+    else:
+        from .bedrock import get_rewriter
+
+        status = get_rewriter().status()
+        if status["active"]:
+            logger.info(
+                "Amazon Bedrock rewriting: ON (%s in %s)",
+                status["model"],
+                status["region"],
+            )
+        else:
+            missing = []
+            if not status["model"]:
+                missing.append("ALEXA_MCP_BEDROCK_MODEL")
+            if status["credentialSource"] == "none":
+                missing.append("AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY")
+            logger.info(
+                "Amazon Bedrock rewriting: off (templates in use; set %s to enable)",
+                " and ".join(missing) or "credentials",
+            )
 
     try:
         httpd.serve_forever()

@@ -14,6 +14,8 @@ Built for **Build, Ship, Shape: Amazon Developer Hackathon 2026 — Alexa+ track
 | Runtime dependencies | **none** — Python 3.11+ standard library only |
 | Tools exposed | 7 |
 | Verification | `python tests/smoke_test.py` → 57 checks, 0 failures |
+| Also verified | `python tests/test_bedrock.py` → 37 checks, 0 failures, no AWS needed |
+| Optional AWS | Amazon Bedrock rephrasing, behind a figure-preservation guard |
 | License | MIT |
 
 ---
@@ -100,6 +102,19 @@ dependency-free MCP client — the same `initialize` → `notifications/initiali
 57 passed, 0 failed
 ```
 
+```bash
+python tests/test_bedrock.py
+```
+
+```
+37 passed, 0 failed
+```
+
+This one covers the Amazon Bedrock integration and, more importantly, the guard that
+stops it from misreporting a figure. **It needs no AWS account and makes no network
+calls** — a stub model is asked to alter, round, and invent numbers, and each attempt
+must be rejected.
+
 ### See what a conversation looks like
 
 ```bash
@@ -110,6 +125,58 @@ This prints, for each turn, the spoken request, the tool that was called, the te
 would say, the on-screen rendering, and the structured payload. The savings turn is
 *chained*: it feeds the action id that `recommend_energy_actions` actually returned into
 `apply_energy_plan`, so the script cannot drift out of sync with the tool surface.
+
+## Amazon Bedrock (optional)
+
+Spoken responses can be rephrased by Amazon Bedrock so they do not sound like a form
+letter. This is entirely optional: **without credentials the server behaves exactly as
+described above**, using the built-in templates.
+
+```bash
+export ALEXA_MCP_BEDROCK_MODEL="<model id from the Bedrock console>"
+export AWS_REGION="us-east-1"
+export AWS_ACCESS_KEY_ID="..."
+export AWS_SECRET_ACCESS_KEY="..."
+python -m alexa_mcp
+```
+
+The startup log always states which mode is active, so "Bedrock is working" can never be
+confused with "Bedrock silently fell back to templates":
+
+```
+INFO alexa_mcp: Amazon Bedrock rewriting: ON (<model-id> in us-east-1)
+INFO alexa_mcp: Amazon Bedrock rewriting: off (templates in use; set ... to enable)
+```
+
+### Bedrock is never allowed to be the source of a number
+
+This is the design constraint that makes a language model safe to put in front of a
+utility bill. Bedrock receives a sentence that **already contains the correct figures**
+and may only re-word it. After the model replies, every numeric token in its output is
+compared against the original; if anything was rounded, dropped, altered, or invented,
+the reply is **discarded** and the template is used instead.
+
+So a hallucination cannot become a wrong bill. It can only become a clumsier sentence.
+
+`tests/test_bedrock.py` proves this offline by driving the rewriter with a stub model that
+tries to change `USD 9.91` into `USD 40`, round it to `USD 10`, drop it entirely, and
+invent an extra percentage. Every attempt is rejected.
+
+Other properties, all tested:
+
+* **Fail-open.** A network error, timeout, throttling response, or malformed payload falls
+  back to the template and is logged at debug level. A cloud failure never surfaces as a
+  tool failure, because a voice assistant must not go silent.
+* **Cached.** Identical input text is not sent twice, so a repeated question does not
+  repeat spend.
+* **Zero dependencies.** The Converse API is called over `urllib` with SigV4 signing in
+  the standard library, consistent with the rest of the project.
+* **Verifiable.** Set `ALEXA_MCP_EXPOSE_STATUS=1` to add a read-only
+  `get_integration_status` tool that reports whether Bedrock is live and how many rewrites
+  were rejected. It makes no generation call, so checking costs nothing.
+
+See [docs/AWS_DEPLOYMENT.md](docs/AWS_DEPLOYMENT.md) for account setup, including a
+billing-safety checklist to do *before* creating any AWS resource.
 
 ## The tools
 

@@ -116,6 +116,7 @@ class McpApplication:
         title: str = "Alexa+ Add-on MCP Server",
         version: str = "0.1.0",
         instructions: str | None = None,
+        bedrock_rewrite: bool = True,
     ) -> None:
         self.registry = registry
         self.sessions = SessionStore()
@@ -125,6 +126,7 @@ class McpApplication:
             "version": version,
         }
         self.instructions = instructions
+        self.bedrock_rewrite = bedrock_rewrite
         self._started_at = time.time()
 
     # -- capabilities -----------------------------------------------------
@@ -299,16 +301,21 @@ class McpApplication:
                 "isError": True,
             }
 
-        return _tool_result(output)
+        return _tool_result(output, bedrock=self.bedrock_rewrite)
 
 
-def _tool_result(output: Any) -> dict[str, Any]:
+def _tool_result(output: Any, *, bedrock: bool = True) -> dict[str, Any]:
     """Normalize a tool return value into a ``CallToolResult``.
 
     A handler may return:
       * a plain string -- becomes the spoken/displayed text,
       * a dict with ``speech``/``display``/``data`` -- the conversational shape,
       * any JSON value -- serialized into the text content.
+
+    When ``bedrock`` is true and Amazon Bedrock is configured, the spoken text is
+    rephrased for natural delivery. Only the wording changes: the figures are
+    verified afterwards against the template, and any mismatch keeps the template.
+    See ``bedrock.py`` for why that check exists.
     """
     if isinstance(output, str):
         return {"content": [{"type": "text", "text": output}]}
@@ -317,6 +324,16 @@ def _tool_result(output: Any) -> dict[str, Any]:
         speech = str(output.get("speech") or output.get("display") or "")
         display = str(output.get("display") or speech)
         data = output.get("data")
+
+        if bedrock and speech:
+            from .bedrock import improve
+
+            rewritten = improve(speech)
+            if rewritten != speech:
+                # Keep both: the spoken version and the authoritative figures.
+                data = {**data, "speechTemplate": speech} if isinstance(data, dict) else data
+                speech = rewritten
+
         content: list[dict[str, Any]] = [{"type": "text", "text": display}]
         if display != speech:
             content.append({"type": "text", "text": speech})
@@ -626,6 +643,7 @@ def create_server(
     title: str = "Alexa+ Add-on MCP Server",
     version: str = "0.1.0",
     instructions: str | None = None,
+    bedrock_rewrite: bool = True,
     log_level: int = logging.INFO,
 ) -> tuple[ThreadingHTTPServer, McpApplication]:
     """Build (but do not start) the MCP HTTP server."""
@@ -641,6 +659,7 @@ def create_server(
         title=title,
         version=version,
         instructions=instructions,
+        bedrock_rewrite=bedrock_rewrite,
     )
 
     handler = type(
